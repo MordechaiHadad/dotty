@@ -1,0 +1,18 @@
+[package]
+name = "dotty"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+dirs = "7.0.0"
+eyre = "0.6.14"
+indicatif = "0.18.6"
+serde = { version = "1.0.229", features = ["derive"] }
+serde-saphyr = { version = "2.0.0", default-features = false, features = ["deserialize"] }
+tracing = "0.1.44"
+tracing-indicatif = "0.3.14"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+[target."cfg(windows)".dependencies]
+junction = { version = "2.1.0", default-features = false }
