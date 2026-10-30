@@ -1,4 +1,5 @@
 use std::process::ExitCode;
+use tracing::error;
 
 mod cli;
 mod handlers;
@@ -8,6 +9,8 @@ mod paths;
 fn main() -> std::process::ExitCode {
     match cli::run() {
         Ok(_) => ExitCode::SUCCESS,
-        Err(_) => ExitCode::FAILURE,
+        Err(error) => {
+            error!("{error}");
+            ExitCode::FAILURE},
     }
 }

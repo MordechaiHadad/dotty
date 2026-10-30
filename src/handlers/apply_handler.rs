@@ -1,4 +1,5 @@
 use crate::manifest::ResolvedFolder;
+use console::style;
 use eyre::{Result, WrapErr, bail, eyre};
 use indicatif::ProgressStyle;
 #[cfg(test)]
@@ -14,6 +15,9 @@ use tracing_indicatif::span_ext::IndicatifSpanExt;
 
 pub(crate) fn run(profile: &str, folders: &[ResolvedFolder]) -> Result<()> {
     let folder_count = folders.len();
+    let mut linked_count = 0;
+    let mut already_linked_count = 0;
+    let mut created_mappings = Vec::new();
     let progress = info_span!("apply", profile, folders = folder_count);
     progress.pb_set_length(folder_count as u64);
     progress.pb_set_style(
@@ -25,27 +29,63 @@ pub(crate) fn run(profile: &str, folders: &[ResolvedFolder]) -> Result<()> {
     info!(profile, "applying profile");
     for folder in folders {
         progress.pb_set_message(&format!("linking {}", folder.target.display()));
-        create_folder_link(&folder.source, &folder.target)?;
+        let linked = create_folder_link(&folder.source, &folder.target)?;
+        if linked {
+            linked_count += 1;
+            created_mappings.push((
+                folder.source.display().to_string(),
+                folder.target.display().to_string(),
+            ));
+        } else {
+            already_linked_count += 1;
+        }
         debug!(
             source = %folder.source.display(),
             target = %folder.target.display(),
-            "linked folder"
+            linked,
+            "processed folder"
         );
         progress.pb_inc(1);
     }
-    progress.pb_set_finish_message(&format!("linked {folder_count} folder(s)"));
+    let mapping_summary = if created_mappings.is_empty() {
+        "    none".to_owned()
+    } else {
+        created_mappings
+            .iter()
+            .map(|(source, target)| {
+                format!(
+                    "    • {} → {}",
+                    style(source).green().for_stderr(),
+                    style(target).cyan().for_stderr()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let summary = format!(
+        "{}\n  {}: {linked_count}\n  {}: {already_linked_count}\n  {}:\n{mapping_summary}",
+        style("  Apply summary").bold().for_stderr(),
+        style("New links created").green().for_stderr(),
+        style("Already-linked targets skipped").dim().for_stderr(),
+        style("Created source → target mappings")
+            .bold()
+            .for_stderr()
+    );
+    drop(_progress_guard);
+    drop(progress);
+    println!("{summary}");
 
     Ok(())
 }
 
-fn create_folder_link(source: &Path, target: &Path) -> Result<()> {
+fn create_folder_link(source: &Path, target: &Path) -> Result<bool> {
     match fs::symlink_metadata(target) {
         Ok(metadata) => {
             if is_directory_link(target, &metadata)
                 .wrap_err_with(|| format!("failed to inspect target {}", target.display()))?
                 && fs::canonicalize(target).ok().as_deref() == Some(source)
             {
-                return Ok(());
+                return Ok(false);
             }
             bail!(
                 "target already exists and is not a link to {}: {}",
@@ -71,7 +111,8 @@ fn create_folder_link(source: &Path, target: &Path) -> Result<()> {
             target.display(),
             source.display()
         )
-    })
+    })?;
+    Ok(true)
 }
 
 #[cfg(windows)]
@@ -123,8 +164,8 @@ mod tests {
         let target = root.join("links/source");
         fs::create_dir_all(&source)?;
 
-        create_folder_link(&source, &target)?;
-        create_folder_link(&source, &target)?;
+        assert!(create_folder_link(&source, &target)?);
+        assert!(!create_folder_link(&source, &target)?);
         assert_eq!(fs::canonicalize(&target)?, fs::canonicalize(&source)?);
 
         let existing_target = root.join("existing");
